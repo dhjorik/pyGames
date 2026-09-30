@@ -1,0 +1,29 @@
+{
+    "github.copilot.chat.agentFolders": [
+        ".agents"
+    ],
+    "files.exclude": {
+        "**/.git": true,
+        "**/__pycache__": true,
+        "**/*.pyc": true,
+        "**/.pytest_cache": true,
+        "**/.env": true
+    },
+    "python.analysis.exclude": [
+        "**/__pycache__",
+        "build",
+        "dist"
+    ],
+    "editor.formatOnSave": true,
+    "editor.rulers": [
+        80,
+        120
+    ],
+    "python-envs.pythonProjects": [
+        {
+            "path": ".",
+            "envManager": "ms-python.python:conda",
+            "packageManager": "ms-python.python:conda"
+        }
+    ]
+}
