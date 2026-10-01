@@ -1,0 +1,25 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+using MongoDB.Driver;
+
+namespace MongoDB
+{
+    public class MongoDBManager
+    {
+        public MongoDBManager() { }
+
+        // Opens a connection to MongoDB using server addresses and replica set
+        public MongoClient OpenConnection(List<string> serverAddresses, string replicaSet)
+        {
+            // Build the MongoDB connection string
+            string servers = string.Join(",", serverAddresses);
+            string connectionString = $"mongodb://{servers}/?replicaSet={replicaSet}";
+            var client = new MongoClient(connectionString);
+            return client;
+        }
+    }
+}

@@ -1,0 +1,11 @@
+# PyEscape level configuration
+# One level per line. Fields may be separated by commas or spaces.
+# Blank lines and lines starting with '#' are ignored.
+#
+# columns:  level_number   seed   maze_w(hex per row)   maze_h(rows)
+#
+1,   101,   8,    8
+2,   202,   10,   10
+3,   303,   12,   12
+4,   404,   14,   16
+5,   505,   18,   18

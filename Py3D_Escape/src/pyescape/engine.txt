@@ -1,0 +1,9 @@
+# PyEscape engine settings
+# Lines are "key = value". Blank lines and lines starting with '#' are ignored.
+#
+# wall_thickness : how thick the maze walls are, in map units.
+#                  A hexagon's circumradius is 1.0, so 0.12 is a slim wall.
+#                  0 gives infinitely thin walls. Large values narrow the
+#                  passages, so keep it well below ~0.4.
+#
+wall_thickness = 0.12
