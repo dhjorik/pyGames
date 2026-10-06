@@ -15,10 +15,10 @@ import sys
 
 import pygame
 
-from pyescape.engine.constants import (
-    SCREEN_WIDTH, SCREEN_HEIGHT, HALF_HEIGHT, FPS, MOVE_SPEED, ROT_SPEED, R,
+from pyescape.engine.constants import FPS, MOVE_SPEED, ROT_SPEED, R
+from pyescape.engine.configurations import (
+    SCREEN_WIDTH, SCREEN_HEIGHT, HALF_HEIGHT, WALL_THICKNESS, load_levels,
 )
-from pyescape.engine.configurations import load_levels, load_engine_config
 from pyescape.engine.maps import generate_maze, build_walls, hex_center
 from pyescape.engine.raycaster import (
     Player, render_world, resolve_collisions, draw_minimap,
@@ -62,7 +62,10 @@ class Game:
         self.exit_y = 0.0
         self.show_map = True
 
-        self.wall_thickness = load_engine_config()["wall_thickness"]
+        # Per-level render settings (filled in by load_level).
+        self.theme = "flat"
+        self.ceiling = (38, 38, 54)
+        self.floor = (58, 58, 58)
 
         self.big = pygame.font.SysFont("consolas", 56, bold=True)
         self.mid = pygame.font.SysFont("consolas", 30, bold=True)
@@ -78,7 +81,10 @@ class Game:
     def load_level(self, index):
         lv = self.levels[index]
         world, start = generate_maze(lv["h"], lv["w"], seed=lv["seed"])
-        self.walls = build_walls(world, self.wall_thickness)
+        self.walls = build_walls(world, WALL_THICKNESS)
+        self.theme = lv.get("theme", "flat")
+        self.ceiling = lv.get("ceiling", (38, 38, 54))
+        self.floor = lv.get("floor", (58, 58, 58))
         sx, sy = hex_center(*start)
         self.player = Player(sx, sy, math.pi / 2)     # face into the maze
         self.exit_y = hex_center(lv["h"] - 1, 0)[1] + R
@@ -151,7 +157,8 @@ class Game:
             self.draw_menu()
             return
 
-        render_world(self.screen, self.walls, self.player)
+        render_world(self.screen, self.walls, self.player,
+                     self.theme, self.ceiling, self.floor)
         if self.show_map:
             draw_minimap(self.screen, self.walls, self.player)
 

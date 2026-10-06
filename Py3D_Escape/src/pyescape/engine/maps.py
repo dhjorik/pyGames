@@ -1,22 +1,21 @@
 """
 Map creation: hexagon geometry, maze generation, and wall building.
 
-A level is a matrix of (color, wall_byte) cells. Walls stored per cell are
-left / front-left / front-right / right (bits 0..3); the back walls are
-shared with the previous row and derived from that row's front walls.
-Layout is "odd rows shifted right".
+Besides the solid wall segments, build_walls tags every face with the light
+of the room it belongs to (centre position + a palette colour index that
+changes room by room). The 'shaded' theme uses that to light each room.
 """
 
 import math
 import random
-
-import numpy as np
+from collections import defaultdict
 
 from .constants import R, HW, LEFT, FRONT_LEFT, FRONT_RIGHT, RIGHT
+from .configurations import CONNECTOR_STEPS
 
 
 # ---------------------------------------------------------------------------
-# Hexagon geometry
+# Hexagon geometry ("odd rows shifted right" layout)
 # ---------------------------------------------------------------------------
 def hex_center(r, c):
     cx = HW + 2.0 * HW * c + (HW if (r % 2) else 0.0)
@@ -27,18 +26,18 @@ def hex_center(r, c):
 def hex_edges(r, c):
     """Return the 6 edges of a hexagon as (name, (x1, y1), (x2, y2))."""
     cx, cy = hex_center(r, c)
-    T  = (cx,      cy - R)        # top point
-    UR = (cx + HW, cy - R / 2)    # upper right
-    LR = (cx + HW, cy + R / 2)    # lower right
-    B  = (cx,      cy + R)        # bottom point
-    LL = (cx - HW, cy + R / 2)    # lower left
-    UL = (cx - HW, cy - R / 2)    # upper left
+    T  = (cx,      cy - R)
+    UR = (cx + HW, cy - R / 2)
+    LR = (cx + HW, cy + R / 2)
+    B  = (cx,      cy + R)
+    LL = (cx - HW, cy + R / 2)
+    UL = (cx - HW, cy - R / 2)
     return [
         ("left",        UL, LL),
         ("right",       UR, LR),
-        ("front_left",  LL, B),   # front == toward the last row (downward)
+        ("front_left",  LL, B),
         ("front_right", B,  LR),
-        ("back_left",   UL, T),   # back  == toward row 0 (upward)
+        ("back_left",   UL, T),
         ("back_right",  T,  UR),
     ]
 
@@ -65,9 +64,9 @@ def back_right_neighbor(r, c):
 def generate_maze(height, width, seed=None):
     """Build a perfect (fully connected) hex maze with a single exit."""
     rng = random.Random(seed)
-    walls = [[0] * width for _ in range(height)]                 # all closed
+    walls = [[0] * width for _ in range(height)]
     color = [[1 + int(6 * r / max(1, height - 1)) for _ in range(width)]
-             for r in range(height)]                            # depth gradient
+             for r in range(height)]
     visited = [[False] * width for _ in range(height)]
 
     def in_bounds(r, c):
@@ -84,7 +83,6 @@ def generate_maze(height, width, seed=None):
         return [(t, rr, cc) for (t, rr, cc) in cand if in_bounds(rr, cc)]
 
     def carve(r, c, tag, rr, cc):
-        # Open the shared wall by setting the correct *stored* bit(s).
         if tag == "L":
             walls[r][c] |= LEFT;  walls[rr][cc] |= RIGHT
         elif tag == "R":
@@ -94,11 +92,10 @@ def generate_maze(height, width, seed=None):
         elif tag == "FR":
             walls[r][c] |= FRONT_RIGHT
         elif tag == "BL":
-            walls[rr][cc] |= FRONT_RIGHT       # our back-left  == nbr front-right
+            walls[rr][cc] |= FRONT_RIGHT
         elif tag == "BR":
-            walls[rr][cc] |= FRONT_LEFT        # our back-right == nbr front-left
+            walls[rr][cc] |= FRONT_LEFT
 
-    # Iterative randomized depth-first search (recursive backtracker).
     start = (0, width // 2)
     visited[start[0]][start[1]] = True
     stack = [start]
@@ -114,7 +111,6 @@ def generate_maze(height, width, seed=None):
         visited[rr][cc] = True
         stack.append((rr, cc))
 
-    # Punch exactly one exit on the last row (a front wall with nothing beyond).
     er = height - 1
     ec = rng.randrange(width)
     walls[er][ec] |= (FRONT_LEFT if rng.random() < 0.5 else FRONT_RIGHT)
@@ -125,43 +121,72 @@ def generate_maze(height, width, seed=None):
 
 
 # ---------------------------------------------------------------------------
-# Build solid wall segments from a WORLD_MAP
+# Wall-segment construction
+#
+# Every emitted face is a 7-tuple:
+#     (p1, p2, color_idx, shade, light_x, light_y, light_color_idx)
 # ---------------------------------------------------------------------------
-def _emit_wall(p1, p2, color, shade, thickness, out):
-    """Emit one edge as either a thin segment or a 4-sided slab of given width."""
+def _emit_wall(p1, p2, color, shade, light, thickness, out):
+    """Emit one edge as a thin segment or a 4-sided slab of given width."""
+    lx, ly, lc = light
     if thickness <= 0.0:
-        out.append((p1, p2, color, shade))
+        out.append((p1, p2, color, shade, lx, ly, lc))
         return
     x1, y1 = p1
     x2, y2 = p2
     dx, dy = x2 - x1, y2 - y1
     length = math.hypot(dx, dy)
     if length == 0.0:
-        out.append((p1, p2, color, shade))
+        out.append((p1, p2, color, shade, lx, ly, lc))
         return
-    ux, uy = dx / length, dy / length       # unit vector along the wall
-    nx, ny = -uy, ux                         # unit normal
+    nx, ny = -dy / length, dx / length
     h = thickness / 2.0
-    # Extend each end by h so neighbouring slabs overlap and close the corners.
-    ax, ay = x1 - ux * h, y1 - uy * h
-    bx, by = x2 + ux * h, y2 + uy * h
-    c1 = (ax + nx * h, ay + ny * h)
-    c2 = (bx + nx * h, by + ny * h)
-    c3 = (bx - nx * h, by - ny * h)
-    c4 = (ax - nx * h, ay - ny * h)
-    cap = shade * 0.75                       # end caps slightly darker for depth
-    out.append((c1, c2, color, shade))       # long face (+normal)
-    out.append((c3, c4, color, shade))       # long face (-normal)
-    out.append((c2, c3, color, cap))         # end cap
-    out.append((c4, c1, color, cap))         # end cap
+    c1 = (x1 + nx * h, y1 + ny * h)
+    c2 = (x2 + nx * h, y2 + ny * h)
+    c3 = (x2 - nx * h, y2 - ny * h)
+    c4 = (x1 - nx * h, y1 - ny * h)
+    cap = shade * 0.75
+    out.append((c1, c2, color, shade, lx, ly, lc))   # long face (+normal)
+    out.append((c3, c4, color, shade, lx, ly, lc))   # long face (-normal)
+    out.append((c2, c3, color, cap, lx, ly, lc))     # end cap
+    out.append((c4, c1, color, cap, lx, ly, lc))     # end cap
+
+
+def _emit_connector(vx, vy, d1, d2, radius, color, shade, light, out,
+                    steps=CONNECTOR_STEPS):
+    """Round the corner where two walls meet at vertex (vx, vy)."""
+    lx, ly, lc = light
+    ox, oy = -(d1[0] + d2[0]), -(d1[1] + d2[1])
+    ol = math.hypot(ox, oy)
+    if ol < 1e-9:
+        return
+    ox, oy = ox / ol, oy / ol
+    n1x, n1y = -d1[1], d1[0]
+    if n1x * ox + n1y * oy < 0:
+        n1x, n1y = -n1x, -n1y
+    n2x, n2y = -d2[1], d2[0]
+    if n2x * ox + n2y * oy < 0:
+        n2x, n2y = -n2x, -n2y
+    a1 = math.atan2(n1y, n1x)
+    a2 = math.atan2(n2y, n2x)
+    da = a2 - a1
+    while da <= -math.pi:
+        da += 2 * math.pi
+    while da > math.pi:
+        da -= 2 * math.pi
+    prev = None
+    for i in range(steps + 1):
+        a = a1 + da * (i / steps)
+        pt = (vx + radius * math.cos(a), vy + radius * math.sin(a))
+        if prev is not None:
+            out.append((prev, pt, color, shade, lx, ly, lc))
+        prev = pt
 
 
 def build_walls(world, thickness=0.0):
-    """Turn a WORLD_MAP into flat arrays of solid wall segments for the engine.
+    """Turn a WORLD_MAP into flat arrays of solid wall segments for the engine."""
+    import numpy as np
 
-    With ``thickness > 0`` every wall becomes a thin slab (four faces) so the
-    walls show real depth at corners and doorways; ``0`` keeps thin walls.
-    """
     height = len(world)
     width = len(world[0])
 
@@ -177,16 +202,17 @@ def build_walls(world, thickness=0.0):
         "back_left": 0.88, "back_right": 0.88,
     }
 
-    seen = {}   # dedup shared edges by their endpoints
+    # Unique closed edges, each remembering the light of its owning room.
+    seen = {}
     for r in range(height):
         for c in range(width):
             color, byte = world[r][c]
+            light = (*hex_center(r, c), 1 + ((r * width + c) % 7))
             open_state = {
                 "left":        bool(byte & LEFT),
                 "right":       bool(byte & RIGHT),
                 "front_left":  bool(byte & FRONT_LEFT),
                 "front_right": bool(byte & FRONT_RIGHT),
-                # derived back walls (out-of-bounds neighbour => closed)
                 "back_left":   bool(bit(*back_left_neighbor(r, c), FRONT_RIGHT)),
                 "back_right":  bool(bit(*back_right_neighbor(r, c), FRONT_LEFT)),
             }
@@ -198,23 +224,46 @@ def build_walls(world, thickness=0.0):
                     (round(p2[0], 3), round(p2[1], 3)),
                 ))
                 if key not in seen:
-                    seen[key] = (p1, p2, color, shade_of[name])
+                    seen[key] = (p1, p2, color, shade_of[name], light)
 
-    # Expand each unique closed edge into faces (thin segment or thick slab).
+    # Expand edges into faces, recording which walls meet at each vertex.
     faces = []
-    for (p1, p2, color, shade) in seen.values():
-        _emit_wall(p1, p2, color, shade, thickness, faces)
+    incident = defaultdict(list)
+    for (p1, p2, color, shade, light) in seen.values():
+        _emit_wall(p1, p2, color, shade, light, thickness, faces)
+        if thickness > 0.0:
+            dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+            length = math.hypot(dx, dy) or 1.0
+            ux, uy = dx / length, dy / length
+            v1 = (round(p1[0], 3), round(p1[1], 3))
+            v2 = (round(p2[0], 3), round(p2[1], 3))
+            incident[v1].append((ux, uy, color, shade, light))
+            incident[v2].append((-ux, -uy, color, shade, light))
 
-    ax, ay, ex, ey, cidx, shd, segs = [], [], [], [], [], [], []
-    for (p1, p2, color, shade) in faces:
+    # Curved connector only where exactly two adjacent walls meet.
+    if thickness > 0.0:
+        h = thickness / 2.0
+        for (vx, vy), items in incident.items():
+            if len(items) != 2:
+                continue
+            (d1x, d1y, color, shade, light), (d2x, d2y, _, _, _) = items
+            _emit_connector(vx, vy, (d1x, d1y), (d2x, d2y),
+                            h, color, shade, light, faces)
+
+    ax, ay, ex, ey, cidx, shd = [], [], [], [], [], []
+    lcx, lcy, lci, segs = [], [], [], []
+    for (p1, p2, color, shade, lx, ly, lc) in faces:
         ax.append(p1[0]); ay.append(p1[1])
         ex.append(p2[0] - p1[0]); ey.append(p2[1] - p1[1])
         cidx.append(color); shd.append(shade)
+        lcx.append(lx); lcy.append(ly); lci.append(lc)
         segs.append((p1[0], p1[1], p2[0], p2[1]))
 
     return {
         "Ax": np.array(ax), "Ay": np.array(ay),
         "Ex": np.array(ex), "Ey": np.array(ey),
         "cidx": np.array(cidx, dtype=int), "shade": np.array(shd),
+        "lcx": np.array(lcx), "lcy": np.array(lcy),
+        "lci": np.array(lci, dtype=int),
         "segs": segs,
     }

@@ -1,11 +1,13 @@
 # PyEscape level configuration
-# One level per line. Fields may be separated by commas or spaces.
-# Blank lines and lines starting with '#' are ignored.
+# Fields may be separated by commas or spaces. '#' lines and blanks ignored.
 #
-# columns:  level_number   seed   maze_w(hex per row)   maze_h(rows)
+# columns:
+#   level_number  seed  maze_w  maze_h  theme  ceiling(#hex)  floor(#hex)
 #
-1,   101,   8,    8
-2,   202,   10,   10
-3,   303,   12,   12
-4,   404,   14,   16
-5,   505,   18,   18
+#   theme : flat | shaded | tron_theme
+#
+1,   101,   6,    6,    flat,        #262636,  #3a3a3a
+2,   202,   6,    6,    shaded,      #0a0a18,  #121216
+3,   303,   8,    8,    tron_theme,  #000000,  #001016
+4,   404,   8,    10,   shaded,      #140f22,  #101014
+5,   505,   14,   12,   tron_theme,  #000000,  #000a12

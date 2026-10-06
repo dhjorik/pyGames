@@ -1,9 +1,17 @@
-# PyEscape engine settings
-# Lines are "key = value". Blank lines and lines starting with '#' are ignored.
-#
-# wall_thickness : how thick the maze walls are, in map units.
-#                  A hexagon's circumradius is 1.0, so 0.12 is a slim wall.
-#                  0 gives infinitely thin walls. Large values narrow the
-#                  passages, so keep it well below ~0.4.
-#
-wall_thickness = 0.12
+# PyEscape engine settings ("key = value"; '#' lines ignored).
+
+# --- Display ---
+screen_width  = 960
+screen_height = 600
+
+# --- Raycasting ---
+num_rays        = 320        # vertical columns cast per frame
+fov             = 66         # field of view, in degrees
+wall_scale      = 1.0        # projected wall height factor
+wall_thickness  = 0.12       # wall slab thickness in map units (0 = thin walls)
+connector_steps = 6          # segments used to approximate each curved corner
+
+# --- Wall palette ---
+# Seven colours for wall indices 1..7 (index 0 is unused / black).
+# Order: green blue red yellow cyan orange white.
+palette = #00c800 #2d5ff0 #dc2d2d #e6dc2d #28d2d2 #f5961e #f0f0f0
