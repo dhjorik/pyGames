@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("IVENavigator")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+342d56e82a7d533b16d55b23c2d8b5ee37e6049f")]
 [assembly: System.Reflection.AssemblyProductAttribute("IVENavigator")]
 [assembly: System.Reflection.AssemblyTitleAttribute("IVENavigator")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

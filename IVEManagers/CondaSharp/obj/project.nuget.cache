@@ -1,8 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "GEh/Q03T/og=",
+  "dgSpecHash": "CtQdXb2tnIU=",
   "success": true,
-  "projectFilePath": "C:\\Pythons\\projects\\sharps\\IVEManagers\\CondaSharp\\CondaSharp.csproj",
-  "expectedPackageFiles": [],
+  "projectFilePath": "C:\\Pythons\\projects\\sharps\\pyGames\\IVEManagers\\CondaSharp\\CondaSharp.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\mboffadossi\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.31\\microsoft.netcore.app.ref.8.0.31.nupkg.sha512",
+    "C:\\Users\\mboffadossi\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.31\\microsoft.windowsdesktop.app.ref.8.0.31.nupkg.sha512",
+    "C:\\Users\\mboffadossi\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.31\\microsoft.aspnetcore.app.ref.8.0.31.nupkg.sha512"
+  ],
   "logs": []
 }
