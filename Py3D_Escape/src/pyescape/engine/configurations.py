@@ -55,6 +55,12 @@ DEFAULT_ENGINE = {
     "wall_scale": 1.0,
     "wall_thickness": 0.12,
     "connector_steps": 6,
+    "wall_height": 1.0,          # how far walls rise above the floor
+    "eye_height": 0.5,           # camera height above the floor
+    "height_range": 0.5,         # max per-hexagon floor elevation
+    "wall_thickness_flat": 0.12,
+    "wall_thickness_shaded": 0.16,
+    "wall_thickness_tron": 0.05,
     "palette": [                 # colours for wall indices 1..7
         (0, 200, 0), (45, 95, 240), (220, 45, 45), (230, 220, 45),
         (40, 210, 210), (245, 150, 30), (240, 240, 240),
@@ -109,6 +115,22 @@ CONNECTOR_STEPS = max(1, int(_ENGINE["connector_steps"]))
 # PALETTE: index 0 is unused (black); indices 1..7 come from engine.txt.
 PALETTE = np.array([[0, 0, 0]] + [list(c) for c in _ENGINE["palette"]],
                    dtype=float)
+
+WALL_HEIGHT = float(_ENGINE["wall_height"])
+EYE_HEIGHT = float(_ENGINE["eye_height"])
+HEIGHT_RANGE = max(0.0, float(_ENGINE["height_range"]))
+
+# Wall thickness per theme (falls back to the global wall_thickness).
+THEME_THICKNESS = {
+    "flat": max(0.0, float(_ENGINE.get("wall_thickness_flat", WALL_THICKNESS))),
+    "shaded": max(0.0, float(_ENGINE.get("wall_thickness_shaded", WALL_THICKNESS))),
+    "tron_theme": max(0.0, float(_ENGINE.get("wall_thickness_tron", WALL_THICKNESS))),
+}
+
+
+def theme_thickness(theme):
+    """Wall thickness for a given theme name."""
+    return THEME_THICKNESS.get(theme, WALL_THICKNESS)
 
 
 # ---------------------------------------------------------------------------

@@ -17,9 +17,13 @@ import pygame
 
 from pyescape.engine.constants import FPS, MOVE_SPEED, ROT_SPEED, R
 from pyescape.engine.configurations import (
-    SCREEN_WIDTH, SCREEN_HEIGHT, HALF_HEIGHT, WALL_THICKNESS, load_levels,
+    SCREEN_WIDTH, SCREEN_HEIGHT, HALF_HEIGHT, WALL_HEIGHT, EYE_HEIGHT,
+    theme_thickness, load_levels,
 )
-from pyescape.engine.maps import generate_maze, build_walls, hex_center
+from pyescape.engine.maps import (
+    generate_maze, generate_heights, build_walls, build_mesh, hex_center,
+    floor_height_at,
+)
 from pyescape.engine.raycaster import (
     Player, render_world, resolve_collisions, draw_minimap,
 )
@@ -58,6 +62,7 @@ class Game:
         self.completed_number = 0
 
         self.walls = None
+        self.mesh = None
         self.player = None
         self.exit_y = 0.0
         self.show_map = True
@@ -80,11 +85,15 @@ class Game:
     # -- level lifecycle ----------------------------------------------------
     def load_level(self, index):
         lv = self.levels[index]
-        world, start = generate_maze(lv["h"], lv["w"], seed=lv["seed"])
-        self.walls = build_walls(world, WALL_THICKNESS)
         self.theme = lv.get("theme", "flat")
         self.ceiling = lv.get("ceiling", (38, 38, 54))
         self.floor = lv.get("floor", (58, 58, 58))
+        thickness = theme_thickness(self.theme)     # thickness depends on theme
+
+        world, start = generate_maze(lv["h"], lv["w"], seed=lv["seed"])
+        heights = generate_heights(lv["h"], lv["w"], lv["seed"])
+        self.walls = build_walls(world, thickness)          # collision / minimap
+        self.mesh = build_mesh(world, heights, thickness, WALL_HEIGHT)
         sx, sy = hex_center(*start)
         self.player = Player(sx, sy, math.pi / 2)     # face into the maze
         self.exit_y = hex_center(lv["h"] - 1, 0)[1] + R
@@ -157,8 +166,9 @@ class Game:
             self.draw_menu()
             return
 
-        render_world(self.screen, self.walls, self.player,
-                     self.theme, self.ceiling, self.floor)
+        eye = floor_height_at(self.player.x, self.player.y, self.mesh) + EYE_HEIGHT
+        render_world(self.screen, self.mesh, self.player,
+                     self.theme, self.ceiling, self.floor, eye)
         if self.show_map:
             draw_minimap(self.screen, self.walls, self.player)
 

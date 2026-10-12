@@ -8,9 +8,19 @@ screen_height = 600
 num_rays        = 320        # vertical columns cast per frame
 fov             = 66         # field of view, in degrees
 wall_scale      = 1.0        # projected wall height factor
-wall_thickness  = 0.12       # wall slab thickness in map units (0 = thin walls)
 connector_steps = 6          # segments used to approximate each curved corner
 
+# --- Heights & camera ---
+wall_height  = 1.0           # how far walls rise above their floor
+eye_height   = 0.5           # camera height above the floor
+height_range = 0.5           # max per-hexagon floor elevation (0 = flat floors)
+ 
+# --- Wall thickness ---
+wall_thickness        = 0.12   # global fallback
+wall_thickness_flat   = 0.12   # thickness used by the 'flat' theme
+wall_thickness_shaded = 0.16   # thickness used by the 'shaded' theme
+wall_thickness_tron   = 0.05   # thickness used by the 'tron_theme' theme
+ 
 # --- Wall palette ---
 # Seven colours for wall indices 1..7 (index 0 is unused / black).
 # Order: green blue red yellow cyan orange white.

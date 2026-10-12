@@ -1,12 +1,14 @@
 """
-The raycasting engine: casts the scene and draws it in one of three themes.
+The render engine: projects the 3D mesh (floor triangles + wall boxes) into a
+first-person view and fills the polygons, in one of three themes.
 
-  flat        : walls coloured by their palette index, shaded by distance.
-  shaded      : each room has a coloured point light at its centre (the colour
-                changes room by room); walls are tinted and attenuated by it.
-  tron_theme  : dark walls with glowing neon edges (Space Paranoids look).
+  flat        : stone floor + palette walls, relief-shaded, depth fog.
+  shaded      : every room tinted by its own palette-coloured light.
+  tron_theme  : dark fills with glowing neon edges (the triangulated floor
+                reads as a Space Paranoids grid).
 
-The ray/segment intersection is shared; only colouring and drawing branch.
+Pipeline: transform to camera space -> near-plane clip -> perspective project
+-> painter's sort (far first) -> fill. Collision and the minimap stay 2D.
 """
 
 import math
@@ -14,10 +16,15 @@ import math
 import numpy as np
 import pygame
 
-from .configurations import (
-    SCREEN_WIDTH, SCREEN_HEIGHT, HALF_HEIGHT, NUM_RAYS, FOV, WALL_SCALE, PALETTE,
-)
+from .configurations import SCREEN_WIDTH, SCREEN_HEIGHT, HALF_HEIGHT, FOV, PALETTE
 from .constants import COLLISION_RADIUS
+
+HALF_W = SCREEN_WIDTH / 2.0
+FOCAL = (SCREEN_WIDTH / 2.0) / math.tan(FOV / 2.0)
+NEAR = 0.05
+FOG_K = 4.0
+FLOOR_BASE = np.array([95.0, 98.0, 112.0])      # flat-theme floor colour
+_CLAMP = 100000
 
 
 # ---------------------------------------------------------------------------
@@ -30,116 +37,110 @@ class Player:
         self.angle = angle
 
 
-# Per-column ray offsets, fish-eye factors, and pixel columns (constant).
-_cols = (np.arange(NUM_RAYS) + 0.5) / NUM_RAYS
-ANG_OFF = np.arctan((2.0 * _cols - 1.0) * math.tan(FOV / 2))
-COS_OFF = np.cos(ANG_OFF)
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def _clip_near(F, Rr, U):
+    """Clip a camera-space polygon against the plane forward == NEAR."""
+    n = len(F)
+    of, oR, oU = [], [], []
+    for i in range(n):
+        j = (i + 1) % n
+        fi, fj = F[i], F[j]
+        ini, inj = fi >= NEAR, fj >= NEAR
+        if ini:
+            of.append(fi); oR.append(Rr[i]); oU.append(U[i])
+        if ini != inj:
+            tt = (NEAR - fi) / (fj - fi)
+            of.append(NEAR)
+            oR.append(Rr[i] + tt * (Rr[j] - Rr[i]))
+            oU.append(U[i] + tt * (U[j] - U[i]))
+    return of, oR, oU
 
-_edges = (np.arange(NUM_RAYS + 1) * SCREEN_WIDTH / NUM_RAYS).astype(int)
-COL_X = _edges[:-1].tolist()
-COL_WIDTH = np.maximum(1, _edges[1:] - _edges[:-1]).tolist()
+
+def _rgb(a):
+    return (int(max(0, min(255, a[0]))),
+            int(max(0, min(255, a[1]))),
+            int(max(0, min(255, a[2]))))
+
+
+def _clamp(v, lo, hi):
+    return lo if v < lo else (hi if v > hi else v)
 
 
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------
-def render_world(screen, walls, player, theme="flat",
-                 ceiling_color=(38, 38, 54), floor_color=(58, 58, 58)):
+def render_world(screen, mesh, player, theme="flat",
+                 ceiling_color=(38, 38, 54), floor_color=(58, 58, 58),
+                 eye_h=0.5):
     screen.fill(ceiling_color, (0, 0, SCREEN_WIDTH, HALF_HEIGHT))
-    screen.fill(floor_color, (0, HALF_HEIGHT, SCREEN_WIDTH, HALF_HEIGHT))
+    screen.fill(floor_color, (0, HALF_HEIGHT, SCREEN_WIDTH,
+                              SCREEN_HEIGHT - HALF_HEIGHT))
 
-    Ax, Ay = walls["Ax"], walls["Ay"]
-    Ex, Ey = walls["Ex"], walls["Ey"]
-    if len(Ax) == 0:
+    V = mesh["V"]
+    polys = mesh["polys"]
+    if len(V) == 0 or not polys:
         return
 
     px, py = player.x, player.y
-    ray_ang = player.angle + ANG_OFF
-    Dx = np.cos(ray_ang)
-    Dy = np.sin(ray_ang)
+    yaw = player.angle
+    fx, fy = math.cos(yaw), math.sin(yaw)
+    rx, ry = -math.sin(yaw), math.cos(yaw)
 
-    # Nearest wall per column (ray/segment intersection).
-    denom = np.outer(Dx, Ey) - np.outer(Dy, Ex)
-    AOx = Ax - px
-    AOy = Ay - py
-    nt = AOx * Ey - AOy * Ex
-    nu = np.outer(Dy, AOx) - np.outer(Dx, AOy)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        t = nt[None, :] / denom
-        u = nu / denom
-    valid = (denom != 0) & (t > 1e-6) & (u >= -1e-9) & (u <= 1 + 1e-9)
-    t = np.where(valid, t, np.inf)
+    d0 = V[:, 0] - px
+    d1 = V[:, 1] - py
+    CF = (d0 * fx + d1 * fy).tolist()           # forward (depth)
+    CR = (d0 * rx + d1 * ry).tolist()           # right
+    CU = (V[:, 2] - eye_h).tolist()             # up
 
-    idx = np.argmin(t, axis=1)
-    tmin = t[np.arange(NUM_RAYS), idx]
-    perp = tmin * COS_OFF
-    finite = np.isfinite(perp)
-    safe_perp = np.where(finite, perp, 1e9)
-    fog = np.clip(3.0 / safe_perp, 0.20, 1.0)
+    tron = (theme == "tron_theme")
+    shaded = (theme == "shaded")
 
-    line_h = np.zeros(NUM_RAYS)
-    line_h[finite] = np.clip(WALL_SCALE * SCREEN_HEIGHT / perp[finite],
-                             1, SCREEN_HEIGHT * 3)
-    y0 = np.clip(HALF_HEIGHT - line_h / 2, 0, SCREEN_HEIGHT).astype(int)
-    y1 = np.clip(HALF_HEIGHT + line_h / 2, 0, SCREEN_HEIGHT).astype(int)
+    draw_list = []
+    for poly in polys:
+        idx = poly["idx"]
+        Fv = [CF[i] for i in idx]
+        if max(Fv) <= NEAR:
+            continue                            # entirely behind camera
+        Rv = [CR[i] for i in idx]
+        Uv = [CU[i] for i in idx]
+        if min(Fv) < NEAR:
+            Fv, Rv, Uv = _clip_near(Fv, Rv, Uv)
+            if len(Fv) < 3:
+                continue
 
-    if theme == "tron_theme":
-        _draw_tron(screen, walls, idx, perp, y0, y1, finite, fog)
-        return
+        pts = []
+        depth = 0.0
+        minx = miny = 1e18
+        maxx = maxy = -1e18
+        for F, Rr, U in zip(Fv, Rv, Uv):
+            sx = _clamp(HALF_W + FOCAL * Rr / F, -_CLAMP, _CLAMP)
+            sy = _clamp(HALF_HEIGHT - FOCAL * U / F, -_CLAMP, _CLAMP)
+            pts.append((sx, sy))
+            depth += F
+            minx = min(minx, sx); maxx = max(maxx, sx)
+            miny = min(miny, sy); maxy = max(maxy, sy)
+        if maxx < 0 or minx > SCREEN_WIDTH or maxy < 0 or miny > SCREEN_HEIGHT:
+            continue                            # off-screen
+        draw_list.append((depth / len(Fv), pts, poly))
 
-    if theme == "shaded":
-        tsafe = np.where(finite, tmin, 0.0)
-        hit_x = px + tsafe * Dx
-        hit_y = py + tsafe * Dy
-        dd = (hit_x - walls["lcx"][idx]) ** 2 + (hit_y - walls["lcy"][idx]) ** 2
-        atten = np.clip(1.7 / (1.0 + dd), 0.15, 1.0)        # room light falloff
-        base = PALETTE[walls["lci"][idx]]                   # per-room light hue
-        bright = atten * fog * walls["shade"][idx]
-    else:  # flat
-        base = PALETTE[walls["cidx"][idx]]
-        bright = walls["shade"][idx] * fog
+    draw_list.sort(key=lambda e: e[0], reverse=True)   # far first
 
-    rgb = np.clip(base * bright[:, None], 0, 255)
-    _draw_solid(screen, rgb, y0, y1, finite)
-
-
-def _draw_solid(screen, rgb, y0, y1, finite):
-    rl = rgb.astype(int).tolist()
-    y0l, y1l, fin = y0.tolist(), y1.tolist(), finite.tolist()
-    for i in range(NUM_RAYS):
-        if not fin[i]:
+    for depth, pts, poly in draw_list:
+        fog = _clamp(FOG_K / depth, 0.15, 1.0)
+        if tron:
+            neon = PALETTE[poly["cidx"]] * _clamp(fog * 1.3, 0.3, 1.0)
+            pygame.draw.polygon(screen, _rgb(neon * 0.12), pts)
+            pygame.draw.polygon(screen, _rgb(neon), pts, 1)
             continue
-        pygame.draw.rect(screen, rl[i],
-                         (COL_X[i], y0l[i], COL_WIDTH[i], y1l[i] - y0l[i]))
-
-
-def _draw_tron(screen, walls, idx, perp, y0, y1, finite, fog):
-    """Dark wall fills with glowing neon edges."""
-    neon = np.clip(PALETTE[walls["cidx"][idx]]
-                   * np.clip(fog * 1.25, 0.35, 1.0)[:, None], 0, 255)
-    dark = np.clip(neon * 0.12, 0, 255)
-    neonl, darkl = neon.astype(int).tolist(), dark.astype(int).tolist()
-    y0l, y1l = y0.tolist(), y1.tolist()
-    fin, perpl, idxl = finite.tolist(), perp.tolist(), idx.tolist()
-
-    # Faint horizon line.
-    pygame.draw.rect(screen, (0, 40, 55), (0, HALF_HEIGHT - 1, SCREEN_WIDTH, 2))
-
-    for i in range(NUM_RAYS):
-        if not fin[i]:
-            continue
-        x, w = COL_X[i], COL_WIDTH[i]
-        a, b, col = y0l[i], y1l[i], neonl[i]
-        pygame.draw.rect(screen, darkl[i], (x, a, w, b - a))     # dark fill
-        pygame.draw.rect(screen, col, (x, a, w, 2))             # top edge
-        pygame.draw.rect(screen, col, (x, max(a, b - 2), w, 2)) # bottom edge
-        # Vertical neon at wall boundaries / depth discontinuities.
-        if i > 0 and fin[i - 1] and (idxl[i] != idxl[i - 1]
-                                     or abs(perpl[i] - perpl[i - 1]) > 0.3):
-            top, bot = min(a, y0l[i - 1]), max(b, y1l[i - 1])
-            pygame.draw.rect(screen, col, (x, top, 2, bot - top))
-        elif i > 0 and not fin[i - 1]:
-            pygame.draw.rect(screen, col, (x, a, 2, b - a))
+        if shaded:
+            base = PALETTE[poly["lci"]]
+        elif poly["kind"] == 0:
+            base = FLOOR_BASE
+        else:
+            base = PALETTE[poly["cidx"]]
+        pygame.draw.polygon(screen, _rgb(base * (poly["shade"] * fog)), pts)
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +172,7 @@ def resolve_collisions(x, y, segs):
 
 
 # ---------------------------------------------------------------------------
-# Minimap overlay
+# Minimap overlay (2D)
 # ---------------------------------------------------------------------------
 def draw_minimap(screen, walls, player):
     segs = walls["segs"]
